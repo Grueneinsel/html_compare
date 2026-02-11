@@ -1,1 +1,118 @@
-<HTML><body> test</body> </HTML>
+<!-- lokales.html -->
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>🌳 CoNLL-U Tree-Vergleich (Multi-Autor)</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">🌳</div>
+      <div>
+        <div class="title">CoNLL-U Tree-Vergleich</div>
+        <div class="subtitle">lokal · mehrere Autoren · ohne Server</div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <label class="btn">
+        <input id="fileInput" type="file" accept=".conllu,.conll,.txt" multiple />
+        Dateien wählen
+      </label>
+
+      <label class="btn secondary" title="Chrome/Edge: ganzen Ordner wählen (inkl. Unterordner)">
+        <input id="dirInput" type="file" webkitdirectory directory multiple />
+        Ordner wählen
+      </label>
+
+      <button id="btnClear" class="btn danger" type="button">Reset</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel">
+      <h2>1) Daten</h2>
+
+      <div class="card">
+        <div class="row">
+          <div class="field">
+            <label>Dokument/Ordner</label>
+            <select id="docSelect" disabled>
+              <option value="">–</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Ansicht</label>
+            <div class="toggles">
+              <label class="toggle"><input id="onlyDiffSents" type="checkbox" /> nur Sätze mit Unterschieden</label>
+              <label class="toggle"><input id="onlyDiffEdges" type="checkbox" /> nur abweichende Kanten anzeigen</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label>Suche (Satztext)</label>
+            <input id="searchInput" type="text" placeholder="z.B. Lars oder und oder ..." disabled />
+          </div>
+
+          <div class="field">
+            <label>Export</label>
+            <div class="actions-inline">
+              <button id="btnDownloadTxt" class="btn secondary" type="button" disabled>tree.txt herunterladen</button>
+              <button id="btnCopy" class="btn secondary" type="button" disabled>Ansicht kopieren</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="hint">
+          <div><strong>Input-Modi</strong></div>
+          <ul>
+            <li><strong>Dateien wählen</strong>: mehrere <code>.conllu</code> Dateien = mehrere Autoren (ein Dokument).</li>
+            <li><strong>Ordner wählen</strong>: Ordnerstruktur wird gruppiert; jeder Unterordner ist ein „Dokument“, Dateien darin sind Autoren.</li>
+          </ul>
+        </div>
+      </div>
+
+      <h2>2) Sätze</h2>
+      <div class="card list-card">
+        <div id="sentList" class="sent-list empty">Noch keine Daten geladen.</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>3) Baum</h2>
+
+      <div class="card">
+        <div class="legend">
+          <span class="badge ok">✅ alle gleich</span>
+          <span class="badge warn">⚠️ Label-Diff (alle haben Kante, aber DEPREL unterscheidet sich)</span>
+          <span class="badge miss">➖ fehlt bei manchen (x/y)</span>
+          <span class="badge tok">✍️ Text-Diff</span>
+        </div>
+
+        <div id="treeMeta" class="meta muted">–</div>
+        <pre id="treeView" class="tree empty">Lade Daten, wähle dann links einen Satz.</pre>
+      </div>
+
+      <h2>Autoren</h2>
+      <div class="card">
+        <div id="authorList" class="authors empty">–</div>
+        <div class="hint small">
+          Dateiname ⇒ Autorname. Du kannst Namen hier direkt ändern (wirkt nur lokal im Browser).
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer muted">
+    Basierend auf der Logik aus <code>trees.py</code> (Satz+Kanten-Union, Root/Children, Cycle-Schutz).
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
