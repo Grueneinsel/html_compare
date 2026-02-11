@@ -94,7 +94,7 @@ body{
 .row{ display:flex; gap:12px; flex-wrap:wrap; }
 .field{ flex:1; min-width: 260px; }
 .field label{ display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
-.field input[type="text"], .field select{
+.field input[type="text"], .field select, .field textarea{
   width:100%;
   padding:10px 12px;
   border-radius:12px;
@@ -103,7 +103,14 @@ body{
   color:var(--text);
   outline:none;
 }
-.field input:disabled, .field select:disabled{ opacity:.6; }
+.field textarea{
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.field input:disabled, .field select:disabled, .field textarea:disabled{ opacity:.6; }
+
 .toggles{ display:flex; flex-direction:column; gap:8px; padding-top:2px; }
 .toggle{ font-size:13px; color:var(--text); display:flex; gap:10px; align-items:center; }
 .toggle input{ transform: scale(1.05); }

@@ -13,7 +13,7 @@
       <div class="logo">🌳</div>
       <div>
         <div class="title">CoNLL-U Tree-Vergleich</div>
-        <div class="subtitle">lokal · mehrere Autoren · ohne Server</div>
+        <div class="subtitle">lokal · mehrere Autoren · Gold-Export</div>
       </div>
     </div>
 
@@ -50,6 +50,7 @@
             <div class="toggles">
               <label class="toggle"><input id="onlyDiffSents" type="checkbox" /> nur Sätze mit Unterschieden</label>
               <label class="toggle"><input id="onlyDiffEdges" type="checkbox" /> nur abweichende Kanten anzeigen</label>
+              <label class="toggle"><input id="showPos" type="checkbox" /> Token zeigen mit UPOS/XPOS</label>
             </div>
           </div>
         </div>
@@ -66,6 +67,13 @@
               <button id="btnDownloadTxt" class="btn secondary" type="button" disabled>tree.txt herunterladen</button>
               <button id="btnCopy" class="btn secondary" type="button" disabled>Ansicht kopieren</button>
             </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label>Geladene Dateien</label>
+            <textarea id="fileList" class="textarea" rows="6" readonly disabled>–</textarea>
           </div>
         </div>
 
@@ -90,7 +98,7 @@
       <div class="card">
         <div class="legend">
           <span class="badge ok">✅ alle gleich</span>
-          <span class="badge warn">⚠️ Label-Diff (alle haben Kante, aber DEPREL unterscheidet sich)</span>
+          <span class="badge warn">⚠️ Label-Diff</span>
           <span class="badge miss">➖ fehlt bei manchen (x/y)</span>
           <span class="badge tok">✍️ Text-Diff</span>
         </div>
@@ -103,14 +111,89 @@
       <div class="card">
         <div id="authorList" class="authors empty">–</div>
         <div class="hint small">
-          Dateiname ⇒ Autorname. Du kannst Namen hier direkt ändern (wirkt nur lokal im Browser).
+          Dateiname ⇒ Autorname. Du kannst Namen hier ändern (wirkt nur lokal im Browser).
+        </div>
+      </div>
+
+      <h2>Gold erzeugen</h2>
+      <div class="card">
+        <div class="row">
+          <div class="field">
+            <label>Gold aus Autor A</label>
+            <select id="goldAuthorA" disabled><option value="">–</option></select>
+          </div>
+          <div class="field">
+            <label>und Autor B</label>
+            <select id="goldAuthorB" disabled><option value="">–</option></select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label>Merge-Strategie</label>
+            <select id="goldMode" disabled>
+              <option value="preferA">Prefer A (A wenn vorhanden, sonst B)</option>
+              <option value="preferB">Prefer B (B wenn vorhanden, sonst A)</option>
+              <option value="unionPreferA">Union, Konflikte → A</option>
+              <option value="unionPreferB">Union, Konflikte → B</option>
+              <option value="intersection">Intersection (nur wenn gleicher HEAD; sonst Konflikt)</option>
+              <option value="strictAgree">Strict (nur wenn HEAD+DEPREL gleich; sonst Konflikt)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Label bei gleichem HEAD aber unterschiedlichem DEPREL</label>
+            <select id="goldLabelMode" disabled>
+              <option value="preferA">DEPREL von A</option>
+              <option value="preferB">DEPREL von B</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label>Token-Quelle (FORM/UPOS/XPOS)</label>
+            <select id="goldTokenMode" disabled>
+              <option value="preferA">Tokens von A (Fallback B)</option>
+              <option value="preferB">Tokens von B (Fallback A)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Satzanzahl</label>
+            <select id="goldSentCountMode" disabled>
+              <option value="min">min(A,B)</option>
+              <option value="max">max(A,B)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label>Custom Optionen</label>
+            <div class="toggles">
+              <label class="toggle"><input id="goldIncludeComments" type="checkbox" checked disabled /> Kommentare (# gold_*) + Konflikt-Zusammenfassung</label>
+              <label class="toggle"><input id="goldMarkMisc" type="checkbox" checked disabled /> Konflikte/Tok-Mismatch in MISC markieren</label>
+              <label class="toggle"><input id="goldFixOrphanHeads" type="checkbox" checked disabled /> HEAD korrigieren, wenn Kopf-Token fehlt (→ 0)</label>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Output-Dateiname</label>
+            <input id="goldFilename" type="text" value="gold.conllu" disabled />
+            <div class="actions-inline" style="margin-top:10px;">
+              <button id="btnGoldDownload" class="btn" type="button" disabled>Gold .conllu herunterladen</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="hint small">
+          In Konfliktfällen wird standardmäßig <code>HEAD=0</code> und <code>DEPREL=dep</code> gesetzt (und optional markiert).
         </div>
       </div>
     </section>
   </main>
 
   <footer class="footer muted">
-    Basierend auf der Logik aus <code>trees.py</code> (Satz+Kanten-Union, Root/Children, Cycle-Schutz).
+    Lokal im Browser · keine Server-Kommunikation
   </footer>
 
   <script src="./app.js"></script>

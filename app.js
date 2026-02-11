@@ -1,7 +1,4 @@
 // app.js
-// CoNLL-U Tree-Vergleich (Multi-Autor) – lokal, ohne Server
-// Idee/Logik angelehnt an trees.py: Union-Kanten pro Satz, Root/Children, Cycle-Schutz. :contentReference[oaicite:1]{index=1}
-
 "use strict";
 
 const $ = (sel) => document.querySelector(sel);
@@ -13,21 +10,38 @@ const btnClear = $("#btnClear");
 const docSelect = $("#docSelect");
 const onlyDiffSents = $("#onlyDiffSents");
 const onlyDiffEdges = $("#onlyDiffEdges");
+const showPos = $("#showPos");
 const searchInput = $("#searchInput");
 
 const sentList = $("#sentList");
 const treeView = $("#treeView");
 const treeMeta = $("#treeMeta");
 const authorList = $("#authorList");
+const fileList = $("#fileList");
 
 const btnDownloadTxt = $("#btnDownloadTxt");
 const btnCopy = $("#btnCopy");
 
-// dataset = { docs: Map(docKey -> doc), activeDocKey, activeSentIndex }
+// Gold UI
+const goldAuthorA = $("#goldAuthorA");
+const goldAuthorB = $("#goldAuthorB");
+const goldMode = $("#goldMode");
+const goldLabelMode = $("#goldLabelMode");
+const goldTokenMode = $("#goldTokenMode");
+const goldSentCountMode = $("#goldSentCountMode");
+const goldIncludeComments = $("#goldIncludeComments");
+const goldMarkMisc = $("#goldMarkMisc");
+const goldFixOrphanHeads = $("#goldFixOrphanHeads");
+const goldFilename = $("#goldFilename");
+const btnGoldDownload = $("#btnGoldDownload");
+
 const dataset = {
   docs: new Map(),
   activeDocKey: null,
   activeSentIndex: null,
+  settings: {
+    showPos: false,
+  }
 };
 
 function makeId(){
@@ -71,7 +85,6 @@ function downloadText(filename, text){
 // -------------------------
 // CoNLL-U Parser
 // -------------------------
-// Pro Satz: tokens Map(tokId -> {form, upos, xpos}), edges Map(depId -> {head, deprel})
 function parseConllu(text){
   const sentences = [];
   let tokens = new Map();
@@ -96,7 +109,7 @@ function parseConllu(text){
     if (cols.length < 8) continue;
 
     const tid = cols[0];
-    if (tid.includes("-") || tid.includes(".")) continue; // MW-tokens / empty nodes skip
+    if (tid.includes("-") || tid.includes(".")) continue;
     if (!/^\d+$/.test(tid)) continue;
 
     const tokId = Number(tid);
@@ -229,18 +242,32 @@ function getSentence(doc, sentIndex){
 
 function tokenDisplay(doc, sentIndex, tokId){
   const forms = doc.authors.map(a => a.sentences[sentIndex]?.tokens.get(tokId)?.form ?? null);
-  const present = forms.filter(x => x !== null);
-  if (present.length === 0) return `${tokId}:❓`;
+  const upos  = doc.authors.map(a => a.sentences[sentIndex]?.tokens.get(tokId)?.upos ?? null);
+  const xpos  = doc.authors.map(a => a.sentences[sentIndex]?.tokens.get(tokId)?.xpos ?? null);
 
-  const distinct = uniq(present);
-  if (distinct.length === 1 && present.length === doc.authors.length){
-    return `${tokId}:${distinct[0]}`;
+  const presentForms = forms.filter(x => x !== null);
+  if (presentForms.length === 0) return `${tokId}:❓`;
+
+  const distinctForms = uniq(presentForms);
+  const sameFormEverywhere = (distinctForms.length === 1 && presentForms.length === doc.authors.length);
+
+  const posSuffix = (i) => {
+    if (!dataset.settings.showPos) return "";
+    const u = upos[i] ?? "∅";
+    const x = xpos[i] ?? "∅";
+    return `[{${u}|${x}}]`;
+  };
+
+  if (sameFormEverywhere){
+    const f = distinctForms[0];
+    // POS: wenn überall da, nimm A
+    return dataset.settings.showPos ? `${tokId}:${f}${posSuffix(0)}` : `${tokId}:${f}`;
   }
 
   const parts = [];
   for (let i=0;i<doc.authors.length;i++){
     const f = forms[i];
-    parts.push(`${doc.authors[i].name}=${f === null ? "∅" : f}`);
+    parts.push(`${doc.authors[i].name}=${f === null ? "∅" : (dataset.settings.showPos ? `${f}${posSuffix(i)}` : f)}`);
   }
   return `${tokId}:${parts.join(" | ")}`;
 }
@@ -285,7 +312,7 @@ function edgeStatus(doc, sentIndex, dep, head){
 }
 
 // -------------------------
-// Rendering
+// Tree Rendering
 // -------------------------
 function renderTree(docKey, sentIndex){
   const doc = dataset.docs.get(docKey);
@@ -333,7 +360,7 @@ function renderTree(docKey, sentIndex){
     if (r !== info.roots.length - 1) lines.push("");
   }
 
-  const meta = `Autoren: ${doc.authors.length} · Kanten-Union: ${info.edgeKeys.length} · fehlt bei manchen: ${info.missingEdges} · Label-Diff: ${info.labelDiffEdges}`;
+  const meta = `Autoren: ${doc.authors.length} · Kanten-Union: ${info.edgeKeys.length} · fehlt: ${info.missingEdges} · Label-Diff: ${info.labelDiffEdges}`;
   const outText = lines.join("\n").trimEnd();
   return { text: outText, meta, txtExport: outText + "\n" };
 }
@@ -359,6 +386,225 @@ function buildSentenceIndex(docKey){
   return list;
 }
 
+// -------------------------
+// Gold generation
+// -------------------------
+function getAuthorById(doc, id){
+  return doc.authors.find(a => a.id === id) || null;
+}
+
+function unionSortedNums(a, b){
+  const s = new Set([...a, ...b]);
+  return [...s].sort((x,y)=>x-y);
+}
+
+function miscJoin(parts){
+  const xs = parts.filter(Boolean);
+  if (xs.length === 0) return "_";
+  return xs.join("|");
+}
+
+function resolveEdge(dep, eA, eB, opt, perTokMisc, conflictNotes){
+  const mark = (key) => { if (opt.markMisc) perTokMisc.add(key); };
+
+  const defaultConflict = (why) => {
+    mark("Gold=conflict");
+    if (opt.includeComments) conflictNotes.push(`dep=${dep}: ${why}`);
+    return { head: 0, deprel: "dep" };
+  };
+
+  const chooseLabel = (la, lb) => {
+    if (la === lb) return la;
+    if (opt.includeComments) conflictNotes.push(`dep=${dep}: label-diff (${opt.labelMode === "preferA" ? "A" : "B"} gewählt) A=${la} B=${lb}`);
+    mark("Gold=labeldiff");
+    return opt.labelMode === "preferA" ? la : lb;
+  };
+
+  const pick = (e) => e ? ({ head: e.head, deprel: e.deprel }) : null;
+
+  if (opt.mode === "preferA"){
+    return pick(eA) || pick(eB) || defaultConflict("missing in both");
+  }
+  if (opt.mode === "preferB"){
+    return pick(eB) || pick(eA) || defaultConflict("missing in both");
+  }
+
+  if (opt.mode === "unionPreferA" || opt.mode === "unionPreferB"){
+    const first = (opt.mode === "unionPreferA") ? eA : eB;
+    const second = (opt.mode === "unionPreferA") ? eB : eA;
+
+    if (first && second){
+      if (first.head === second.head){
+        const deprel = chooseLabel(first.deprel, second.deprel);
+        return { head: first.head, deprel };
+      }
+      mark("Gold=headconflict");
+      if (opt.includeComments) conflictNotes.push(`dep=${dep}: head-conflict (${opt.mode.endsWith("A") ? "A" : "B"} gewählt) A=${eA.head} B=${eB.head}`);
+      return { head: first.head, deprel: first.deprel };
+    }
+    return pick(first) || pick(second) || defaultConflict("missing in both");
+  }
+
+  if (opt.mode === "intersection"){
+    if (eA && eB && eA.head === eB.head){
+      const deprel = chooseLabel(eA.deprel, eB.deprel);
+      return { head: eA.head, deprel };
+    }
+    if (eA && !eB) return defaultConflict("only in A (intersection)");
+    if (!eA && eB) return defaultConflict("only in B (intersection)");
+    if (eA && eB) return defaultConflict(`head-conflict (intersection) A=${eA.head} B=${eB.head}`);
+    return defaultConflict("missing in both");
+  }
+
+  if (opt.mode === "strictAgree"){
+    if (eA && eB && eA.head === eB.head && eA.deprel === eB.deprel){
+      return { head: eA.head, deprel: eA.deprel };
+    }
+    if (eA && !eB) return defaultConflict("only in A (strict)");
+    if (!eA && eB) return defaultConflict("only in B (strict)");
+    if (eA && eB){
+      if (eA.head !== eB.head) return defaultConflict(`head-conflict (strict) A=${eA.head} B=${eB.head}`);
+      return defaultConflict(`label-conflict (strict) A=${eA.deprel} B=${eB.deprel}`);
+    }
+    return defaultConflict("missing in both");
+  }
+
+  // fallback
+  return pick(eA) || pick(eB) || defaultConflict("missing in both");
+}
+
+function generateGoldConllu(doc, aId, bId, opt){
+  const A = getAuthorById(doc, aId);
+  const B = getAuthorById(doc, bId);
+  if (!A || !B) throw new Error("Autor A/B ungültig");
+
+  const sCount = (opt.sentCountMode === "min")
+    ? Math.min(A.sentences.length, B.sentences.length)
+    : Math.max(A.sentences.length, B.sentences.length);
+
+  const out = [];
+
+  for (let s=0; s<sCount; s++){
+    const sa = A.sentences[s] || { tokens:new Map(), edges:new Map() };
+    const sb = B.sentences[s] || { tokens:new Map(), edges:new Map() };
+
+    const ids = unionSortedNums([...sa.tokens.keys()], [...sb.tokens.keys()]);
+    if (ids.length === 0) continue;
+
+    const baseTokFromA = (opt.tokenMode === "preferA");
+    const perTokMiscById = new Map(); // id -> Set
+    const conflictNotes = [];
+
+    const pickTok = (id) => {
+      const ta = sa.tokens.get(id) || null;
+      const tb = sb.tokens.get(id) || null;
+
+      let chosen = null;
+      if (baseTokFromA) chosen = ta || tb;
+      else chosen = tb || ta;
+
+      const misc = new Set();
+      if (!chosen){
+        misc.add("Gold=tokmissing");
+        if (opt.includeComments) conflictNotes.push(`tok=${id}: missing in both`);
+        return { tok: {form:"_", upos:"_", xpos:"_"}, misc };
+      }
+
+      // mismatch marker
+      if (ta && tb){
+        if (ta.form !== tb.form || ta.upos !== tb.upos || ta.xpos !== tb.xpos){
+          misc.add("Gold=tokmismatch");
+          if (opt.includeComments){
+            conflictNotes.push(`tok=${id}: mismatch A=(${ta.form},${ta.upos},${ta.xpos}) B=(${tb.form},${tb.upos},${tb.xpos})`);
+          }
+        }
+      }
+      return { tok: chosen, misc };
+    };
+
+    // sentence header/comments
+    const textA = sentenceText(sa);
+    const textB = sentenceText(sb);
+    const text = (baseTokFromA ? (textA || textB) : (textB || textA));
+
+    if (opt.includeComments){
+      out.push(`# sent_id = ${s+1}`);
+      out.push(`# text = ${text}`);
+      out.push(`# gold_from = ${A.name} | ${B.name}`);
+      out.push(`# gold_mode = ${opt.mode}; label=${opt.labelMode}; tokens=${opt.tokenMode}; sentCount=${opt.sentCountMode}`);
+    }
+
+    // token lines
+    for (const id of ids){
+      const { tok, misc } = pickTok(id);
+
+      // resolve edge for this dep id
+      const eA = sa.edges.get(id) || null;
+      const eB = sb.edges.get(id) || null;
+
+      const edgeMisc = new Set();
+      const resolved = resolveEdge(
+        id,
+        eA ? {head:eA.head, deprel:eA.deprel} : null,
+        eB ? {head:eB.head, deprel:eB.deprel} : null,
+        opt,
+        edgeMisc,
+        conflictNotes
+      );
+
+      // orphan head fix
+      let head = resolved.head;
+      let deprel = resolved.deprel;
+
+      if (opt.fixOrphanHeads && head !== 0 && !ids.includes(head)){
+        if (opt.includeComments) conflictNotes.push(`tok=${id}: orphan head=${head} (→ 0)`);
+        edgeMisc.add("Gold=orphanhead");
+        head = 0;
+        deprel = "dep";
+      }
+
+      const miscSet = new Set();
+      if (opt.markMisc){
+        for (const m of misc) miscSet.add(m);
+        for (const m of edgeMisc) miscSet.add(m);
+      }
+
+      // Columns: ID FORM LEMMA UPOS XPOS FEATS HEAD DEPREL DEPS MISC
+      const cols = [
+        String(id),
+        tok.form ?? "_",
+        "_",
+        tok.upos ?? "_",
+        tok.xpos ?? "_",
+        "_",
+        String(head),
+        deprel ?? "_",
+        "_",
+        miscJoin([...miscSet])
+      ];
+      out.push(cols.join("\t"));
+    }
+
+    if (opt.includeComments && conflictNotes.length){
+      out.push(`# gold_conflicts = ${conflictNotes.length}`);
+      // kurze Liste, aber nicht pro Token 100 Zeilen; dennoch hilfreich:
+      for (const c of conflictNotes.slice(0, 30)){
+        out.push(`# gold_note = ${c}`);
+      }
+      if (conflictNotes.length > 30){
+        out.push(`# gold_note = ... (${conflictNotes.length - 30} weitere)`);
+      }
+    }
+
+    out.push(""); // sentence separator
+  }
+
+  return out.join("\n");
+}
+
+// -------------------------
+// Rendering UI
+// -------------------------
 function renderSentenceList(){
   const docKey = dataset.activeDocKey;
   const doc = dataset.docs.get(docKey);
@@ -463,7 +709,9 @@ function renderAuthors(){
     inp.value = a.name;
     inp.addEventListener("input", () => {
       a.name = inp.value.trim() || a.name;
-      renderAll();
+      renderGoldAuthorSelects();
+      renderFileList();
+      renderAll(); // damit Baum gleich neue Namen nutzt
     });
 
     const file = document.createElement("div");
@@ -532,16 +780,75 @@ function renderTreePanel(){
   btnCopy.disabled = false;
 }
 
+function renderFileList(){
+  const doc = dataset.docs.get(dataset.activeDocKey);
+  if (!doc){
+    fileList.value = "–";
+    fileList.disabled = true;
+    return;
+  }
+  fileList.disabled = false;
+  const lines = [];
+  lines.push(`Dokument: ${doc.label}`);
+  lines.push(`Autoren: ${doc.authors.length}`);
+  lines.push("");
+  for (const a of doc.authors){
+    lines.push(`- ${a.name}  ⇢  ${a.fileName}`);
+  }
+  fileList.value = lines.join("\n");
+}
+
+function enableGoldUI(enabled){
+  const els = [
+    goldAuthorA, goldAuthorB, goldMode, goldLabelMode, goldTokenMode, goldSentCountMode,
+    goldIncludeComments, goldMarkMisc, goldFixOrphanHeads, goldFilename, btnGoldDownload
+  ];
+  for (const el of els) el.disabled = !enabled;
+}
+
+function renderGoldAuthorSelects(){
+  const doc = dataset.docs.get(dataset.activeDocKey);
+  goldAuthorA.innerHTML = `<option value="">–</option>`;
+  goldAuthorB.innerHTML = `<option value="">–</option>`;
+
+  if (!doc || doc.authors.length < 2){
+    enableGoldUI(false);
+    return;
+  }
+  enableGoldUI(true);
+
+  for (const a of doc.authors){
+    const o1 = document.createElement("option");
+    o1.value = a.id;
+    o1.textContent = `${a.name}`;
+    goldAuthorA.appendChild(o1);
+
+    const o2 = document.createElement("option");
+    o2.value = a.id;
+    o2.textContent = `${a.name}`;
+    goldAuthorB.appendChild(o2);
+  }
+
+  // defaults: erste zwei Autoren
+  if (!goldAuthorA.value) goldAuthorA.value = doc.authors[0].id;
+  if (!goldAuthorB.value) goldAuthorB.value = doc.authors[1].id;
+}
+
 function renderAll(){
   const hasData = dataset.docs.size > 0;
   searchInput.disabled = !hasData;
 
   renderDocSelect();
   renderAuthors();
+  renderFileList();
+  renderGoldAuthorSelects();
   renderSentenceList();
   renderTreePanel();
 }
 
+// -------------------------
+// Events
+// -------------------------
 docSelect.addEventListener("change", () => {
   dataset.activeDocKey = docSelect.value;
   dataset.activeSentIndex = null;
@@ -550,6 +857,12 @@ docSelect.addEventListener("change", () => {
 
 onlyDiffSents.addEventListener("change", renderAll);
 onlyDiffEdges.addEventListener("change", renderAll);
+
+showPos.addEventListener("change", () => {
+  dataset.settings.showPos = showPos.checked;
+  renderAll();
+});
+
 searchInput.addEventListener("input", renderAll);
 
 btnClear.addEventListener("click", () => {
@@ -558,6 +871,7 @@ btnClear.addEventListener("click", () => {
   dataset.activeSentIndex = null;
   fileInput.value = "";
   dirInput.value = "";
+  enableGoldUI(false);
   renderAll();
 });
 
@@ -577,6 +891,32 @@ btnCopy.addEventListener("click", async () => {
   }catch{
     alert("Clipboard nicht verfügbar. Markiere den Text im Tree-Feld und kopiere manuell.");
   }
+});
+
+btnGoldDownload.addEventListener("click", () => {
+  const doc = dataset.docs.get(dataset.activeDocKey);
+  if (!doc) return;
+
+  const aId = goldAuthorA.value;
+  const bId = goldAuthorB.value;
+  if (!aId || !bId || aId === bId){
+    alert("Bitte zwei unterschiedliche Autoren auswählen.");
+    return;
+  }
+
+  const opt = {
+    mode: goldMode.value,
+    labelMode: goldLabelMode.value,
+    tokenMode: goldTokenMode.value,
+    sentCountMode: goldSentCountMode.value,
+    includeComments: goldIncludeComments.checked,
+    markMisc: goldMarkMisc.checked,
+    fixOrphanHeads: goldFixOrphanHeads.checked,
+  };
+
+  const name = (goldFilename.value || "gold.conllu").trim() || "gold.conllu";
+  const text = generateGoldConllu(doc, aId, bId, opt);
+  downloadText(name, text);
 });
 
 fileInput.addEventListener("change", async (ev) => {
@@ -606,4 +946,5 @@ dirInput.addEventListener("change", async (ev) => {
   renderAll();
 });
 
+enableGoldUI(false);
 renderAll();
